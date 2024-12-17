@@ -56,13 +56,20 @@ class DownloadThread(QThread):
             ])
         ]
 
-        self._show_system_info()
-        
-        for category, file_list in files:
-            if not self._process_category(category, file_list):
-                break
-
-        self._show_cleanup_tasks()
+        while self.running:
+            self._show_system_info()
+            
+            for category, file_list in files:
+                if not self._process_category(category, file_list):
+                    return
+            
+            self._show_cleanup_tasks()
+            
+            # 添加循环提示
+            self.update_signal.emit("\n[INFO] ====================================")
+            self.update_signal.emit("[INFO] Starting next update cycle...")
+            self.update_signal.emit("[INFO] ====================================\n")
+            time.sleep(2)  # 在开始新的循环前暂停2秒
 
     def _show_system_info(self):
         self.update_signal.emit("[INFO] System Update Service Started")
