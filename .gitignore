@@ -1,3 +1,5 @@
 _pycache_
 build/
 dist/
+*.pyc
+release/
