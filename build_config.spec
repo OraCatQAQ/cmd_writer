@@ -27,7 +27,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name='小说下载器',
+    name='cmd_writer',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

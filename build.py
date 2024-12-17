@@ -22,19 +22,19 @@ def build_executable():
         subprocess.run(['pyinstaller', 'build_config.spec'], check=True)
         
         # 创建发布目录
-        release_dir = f'release/小说下载器_v1.0_{datetime.now().strftime("%Y%m%d")}'
+        release_dir = f'release/cmd_writer_v1.0_{datetime.now().strftime("%Y%m%d")}'
         if not os.path.exists(release_dir):
-            os.makedirs(release_dir)
+            os.makedirs(release_dir)    
         
         # 复制构建文件到发布目录
-        shutil.copy('dist/小说下载器.exe', release_dir)
+        shutil.copy('dist/cmd_writer.exe', release_dir)
         
         # 创建必要的文档
         with open(f'{release_dir}/使用说明.txt', 'w', encoding='utf-8') as f:
-            f.write("""小说下载器使用说明
+            f.write("""cmd_writer使用说明
 
 1. 快捷键：
-   - Ctrl+H : 显��帮助信息
+   - Ctrl+H : 显示帮助信息
    - Ctrl+B : 显示/隐藏工具栏
    - Ctrl+D : 显示文件列表
    - Ctrl+O : 打开文件

@@ -41,6 +41,10 @@ class FakeConsole(QMainWindow):
         self.setupInfoPanel()
         self.toolbar_widget.hide()
         self.info_panel.hide()
+        
+        # 初始状态下禁用输入
+        self.input_line.setEnabled(False)
+        self.input_line.setPlaceholderText("请先创建或打开文件 (Ctrl+N / Ctrl+O)")
 
     def initUI(self):
         # 设置窗口
@@ -161,16 +165,21 @@ class FakeConsole(QMainWindow):
         content_widget.setStyleSheet("background-color: black;")
         content_layout = QVBoxLayout(content_widget)
         
-        self.info_label = QLabel()
-        self.info_label.setWordWrap(True)
-        self.info_label.setStyleSheet("""
-            QLabel {
+        # 将 QLabel 替换为 QTextEdit
+        self.info_text = QTextEdit()
+        self.info_text.setReadOnly(False)  # 允许编辑
+        self.info_text.setStyleSheet("""
+            QTextEdit {
                 color: white;
+                background-color: black;
+                border: none;
                 padding: 10px;
+                font-family: Consolas, Monaco, monospace;
             }
         """)
-        content_layout.addWidget(self.info_label)
-        content_layout.addStretch()
+        # 连接文本变化信号
+        self.info_text.textChanged.connect(self.sync_content_to_main)
+        content_layout.addWidget(self.info_text)
         
         # 将内容部件设置到滚动区域
         scroll_area.setWidget(content_widget)
@@ -204,9 +213,31 @@ class FakeConsole(QMainWindow):
             shortcut = QShortcut(key, self)
             shortcut.activated.connect(callback)
         
-        # 添加关闭信息面板的快捷键
+        # 添加关闭和重新打开信息面板的快捷键
         close_info_shortcut = QShortcut(QKeySequence('Esc'), self)
-        close_info_shortcut.activated.connect(lambda: self.info_panel.hide())
+        close_info_shortcut.activated.connect(self.close_info_panel)
+        
+        reopen_info_shortcut = QShortcut(QKeySequence('Alt+Q'), self)
+        reopen_info_shortcut.activated.connect(self.reopen_info_panel)
+
+    def close_info_panel(self):
+        """关闭信息面板并保存状态"""
+        if self.info_panel.isVisible():
+            self.last_info_state = {
+                'title': self.info_title.text(),
+                'content': self.info_text.toPlainText(),
+                'readonly': self.info_text.isReadOnly()
+            }
+            self.info_panel.hide()
+
+    def reopen_info_panel(self):
+        """重新打开上次关闭的信息面板"""
+        if hasattr(self, 'last_info_state') and self.last_info_state:
+            self.info_text.setReadOnly(self.last_info_state['readonly'])
+            self.show_info_panel(
+                self.last_info_state['title'],
+                self.last_info_state['content']
+            )
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -250,12 +281,18 @@ class FakeConsole(QMainWindow):
         cursor.insertText(text, format)
 
     def process_input(self):
+        if not hasattr(self.file_manager, 'current_file'):
+            self._format_and_insert_text("[ERROR] 请先创建或打开文件\n")
+            return
+        
         text = self.input_line.text()
         if text:
             if hasattr(self, 'waiting_for_filename') and self.waiting_for_filename:
                 success, filepath = self.file_manager.create_file(text)
                 if success:
                     self._format_and_insert_text(f"[SUCCESS] 已创建新文件: {os.path.basename(filepath)}\n")
+                    self.input_line.setEnabled(True)
+                    self.input_line.setPlaceholderText("输入内容后按回车...")
                 else:
                     self._format_and_insert_text(f"[WARNING] 文件已存在: {os.path.basename(filepath)}\n")
                 self.waiting_for_filename = False
@@ -263,12 +300,19 @@ class FakeConsole(QMainWindow):
             elif hasattr(self, 'waiting_for_open') and self.waiting_for_open:
                 if self.file_manager.open_file(text):
                     self._format_and_insert_text(f"[SUCCESS] 已切换到文件: {text}\n")
+                    self.input_line.setEnabled(True)
+                    self.input_line.setPlaceholderText("输入内容后按回车...")
+                    # 打开文件后自动显示内容
+                    self.show_current_content()
                 else:
                     self._format_and_insert_text(f"[ERROR] 文件不存在: {text}\n")
                 self.waiting_for_open = False
                 
             else:
                 self.file_manager.save_content(text)
+                # 如果信息面板正在显示当前文件，更新其内容
+                if self.info_panel.isVisible():
+                    self.show_current_content()
             
             self.input_line.clear()
 
@@ -284,6 +328,7 @@ class FakeConsole(QMainWindow):
     Ctrl+N : 新建文件
     Ctrl+R : 显示当前文件内容
     Esc   : 关闭信息窗口
+    Alt+Q : 重新打开上次关闭的窗口
     
 [INFO] 写作提示:
     - 所有输入内容会自动保存到当前文件
@@ -304,26 +349,35 @@ class FakeConsole(QMainWindow):
                     f"大小: {file['size']/1024:.1f} KB\n"
                     f"修改时间: {file['modified'].strftime('%Y-%m-%d %H:%M:%S')}\n\n"
                 )
+        
+        # 对于文件列表，设置为只读
+        self.info_text.setReadOnly(True)
         self.show_info_panel("文件列表", content)
 
     def create_new_file(self):
         self._format_and_insert_text("\n[INFO] 请输入新文件名 (不需要输入.txt后缀):")
+        self.input_line.setEnabled(True)
         self.input_line.setPlaceholderText("输入文件名后按回车...")
         self.waiting_for_filename = True
 
     def open_file(self):
         self._format_and_insert_text("\n[INFO] 请输入要打开的文件名:")
+        self.input_line.setEnabled(True)
         self.input_line.setPlaceholderText("输入文件名后按回车...")
         self.waiting_for_open = True
 
     def show_current_content(self):
+        """显示当前文件内容"""
         try:
             with open(self.file_manager.current_file, 'r', encoding='utf-8') as f:
                 content = f.read()
-            self.show_info_panel(
-                f"文件内容 - {os.path.basename(self.file_manager.current_file)}", 
-                content
-            )
+            
+            # 更新信息面板标题和内容
+            self.info_title.setText(f"文件内容 - {os.path.basename(self.file_manager.current_file)}")
+            self.info_text.setPlainText(content)
+            
+            # 显示面板
+            self.show_info_panel()
         except Exception as e:
             self._format_and_insert_text(f"[ERROR] 读取文件时出错: {str(e)}\n")
 
@@ -357,14 +411,18 @@ class FakeConsole(QMainWindow):
         self.download_thread.running = False
         event.accept()
 
-    def show_info_panel(self, title, content):
+    def show_info_panel(self, title=None, content=None):
+        """显示信息面板"""
         # 计算窗口位置（在工具栏左侧显示）
-        x = self.width() - 440  # 工具栏宽度40，所以窗口位置在-440
-        y = 50  # 距离顶部一定距离
+        x = self.width() - 440
+        y = 50
         self.info_panel.move(x, y)
         
-        self.info_title.setText(title)
-        self.info_label.setText(content)
+        if title:
+            self.info_title.setText(title)
+        if content:
+            self.info_text.setPlainText(content)
+        
         self.info_panel.show()
 
     def show_settings(self):
@@ -382,3 +440,22 @@ class FakeConsole(QMainWindow):
                 self._format_and_insert_text(f"[SUCCESS] 已更新保存目录: {new_dir}\n")
             except Exception as e:
                 self._format_and_insert_text(f"[ERROR] 更新目录失败: {str(e)}\n")
+
+    def sync_content_to_main(self):
+        """将信息面板的内容同步到主窗口"""
+        if hasattr(self, 'syncing') and self.syncing:
+            return
+        
+        self.syncing = True
+        try:
+            current_file = self.file_manager.current_file
+            content = self.info_text.toPlainText()
+            
+            # 保存到文件
+            with open(current_file, 'w', encoding='utf-8') as f:
+                f.write(content)
+                
+            # 更新主窗口显示
+            self._format_and_insert_text("[INFO] 内容已同步\n")
+        finally:
+            self.syncing = False
