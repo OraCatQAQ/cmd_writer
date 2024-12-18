@@ -350,7 +350,7 @@ class FakeConsole(QMainWindow):
                     f"修改时间: {file['modified'].strftime('%Y-%m-%d %H:%M:%S')}\n\n"
                 )
         
-        # 对于文件列表，设置为只读
+        # 文件列表保持只读
         self.info_text.setReadOnly(True)
         self.show_info_panel("文件列表", content)
 
@@ -375,6 +375,8 @@ class FakeConsole(QMainWindow):
             # 更新信息面板标题和内容
             self.info_title.setText(f"文件内容 - {os.path.basename(self.file_manager.current_file)}")
             self.info_text.setPlainText(content)
+            # 设置为可编辑模式
+            self.info_text.setReadOnly(False)
             
             # 显示面板
             self.show_info_panel()
