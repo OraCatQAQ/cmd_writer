@@ -7,7 +7,6 @@ class Settings:
         self.default_shortcuts = {
             'close': 'Ctrl+Q',
             'minimize': 'Ctrl+M',
-            'help': 'Ctrl+H',
             'toggle_toolbar': 'Ctrl+B',
             'save': 'Ctrl+S',
             'show_content': 'Ctrl+R',

@@ -251,7 +251,6 @@ class FakeConsole(QMainWindow):
         shortcuts = [
             ('close', self.close),
             ('minimize', self.showMinimized),
-            ('help', self.showHelp),
             ('toggle_toolbar', self.toggleToolBar),
             ('save', self.manual_save),
             ('show_content', self.show_current_content),
@@ -639,7 +638,6 @@ class FakeConsole(QMainWindow):
         for action, description in {
             'close': '退出程序',
             'minimize': '最小化窗口',
-            'help': '显示帮助',
             'toggle_toolbar': '显示/隐藏工具栏',
             'save': '保存内容',
             'show_content': '显示文件内容',
