@@ -1,7 +1,7 @@
 import os
 from datetime import datetime
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, 
-                            QTextEdit, QLineEdit, QShortcut, QLabel, QScrollArea, QFrame, QPushButton, QHBoxLayout, QFileDialog, QTextBrowser, QDialog, QGroupBox, QDialogButtonBox, QCheckBox)
+                            QTextEdit, QLineEdit, QShortcut, QLabel, QScrollArea, QFrame, QPushButton, QHBoxLayout, QFileDialog, QTextBrowser, QDialog, QGroupBox, QDialogButtonBox, QCheckBox, QTabWidget, QGridLayout)
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QIcon, QTextCharFormat, QColor, QTextCursor, QKeySequence
 
@@ -238,20 +238,33 @@ class FakeConsole(QMainWindow):
         self.info_panel.hide()
 
     def setupShortcuts(self):
+        """设置快捷键"""
+        # 清除现有的快捷键
+        if hasattr(self, '_shortcuts'):
+            for shortcut in self._shortcuts:
+                shortcut.setEnabled(False)
+                shortcut.deleteLater()
+        
+        self._shortcuts = []
+        
+        # 设置新的快捷键
         shortcuts = [
-            ('Ctrl+Q', self.close),
-            ('Ctrl+M', self.showMinimized),
-            ('Ctrl+H', self.showHelp),
-            ('Ctrl+B', self.toggleToolBar),
-            ('Ctrl+S', self.manual_save),
-            ('Ctrl+R', self.show_current_content),
-            ('Ctrl+Z', self.undo_last_input),
-            ('Esc', self.close_editor_panel)
+            ('close', self.close),
+            ('minimize', self.showMinimized),
+            ('help', self.showHelp),
+            ('toggle_toolbar', self.toggleToolBar),
+            ('save', self.manual_save),
+            ('show_content', self.show_current_content),
+            ('undo', self.undo_last_input),
+            ('close_editor', self.close_editor_panel)
         ]
         
-        for key, callback in shortcuts:
-            shortcut = QShortcut(key, self)
-            shortcut.activated.connect(callback)
+        for action, callback in shortcuts:
+            key = self.settings.load_shortcut(action)
+            if key:
+                shortcut = QShortcut(QKeySequence(key), self)
+                shortcut.activated.connect(callback)
+                self._shortcuts.append(shortcut)
 
     def close_info_panel(self):
         """关闭编辑器面板"""
@@ -575,9 +588,16 @@ class FakeConsole(QMainWindow):
         """显示设置对话框"""
         dialog = QDialog(self)
         dialog.setWindowTitle("设置")
-        dialog.setFixedSize(400, 200)
+        dialog.setMinimumWidth(500)
         
         layout = QVBoxLayout(dialog)
+        
+        # 创建选项卡
+        tab_widget = QTabWidget()
+        
+        # 基本设置选项卡
+        basic_tab = QWidget()
+        basic_layout = QVBoxLayout(basic_tab)
         
         # 目录设置
         dir_group = QGroupBox("文件保存目录")
@@ -603,6 +623,78 @@ class FakeConsole(QMainWindow):
         status_check = QCheckBox("显示状态信息")
         status_check.setChecked(self.settings.load_show_status())
         
+        basic_layout.addWidget(dir_group)
+        basic_layout.addWidget(status_check)
+        
+        # 快捷键设置选项卡
+        shortcut_tab = QWidget()
+        shortcut_layout = QVBoxLayout(shortcut_tab)
+        
+        shortcut_group = QGroupBox("快捷键设置")
+        grid_layout = QGridLayout()
+        
+        shortcut_editors = {}
+        row = 0
+        
+        for action, description in {
+            'close': '退出程序',
+            'minimize': '最小化窗口',
+            'help': '显示帮助',
+            'toggle_toolbar': '显示/隐藏工具栏',
+            'save': '保存内容',
+            'show_content': '显示文件内容',
+            'undo': '撤销操作',
+            'close_editor': '关闭编辑器'
+        }.items():
+            # 添加描述标签
+            grid_layout.addWidget(QLabel(description), row, 0)
+            
+            # 添加快捷键编辑框
+            editor = QLineEdit(self.settings.load_shortcut(action))
+            editor.setPlaceholderText("点击输入快捷键")
+            
+            def create_key_press_handler(editor, action):
+                def handle_key_press(event):
+                    key_sequence = []
+                    if event.modifiers() & Qt.ControlModifier:
+                        key_sequence.append('Ctrl')
+                    if event.modifiers() & Qt.AltModifier:
+                        key_sequence.append('Alt')
+                    if event.modifiers() & Qt.ShiftModifier:
+                        key_sequence.append('Shift')
+                    
+                    key = event.key()
+                    if key != Qt.Key_Control and key != Qt.Key_Alt and key != Qt.Key_Shift:
+                        key_sequence.append(QKeySequence(key).toString())
+                    
+                    if key_sequence:
+                        editor.setText('+'.join(key_sequence))
+                    event.accept()
+                return handle_key_press
+            
+            editor.keyPressEvent = create_key_press_handler(editor, action)
+            shortcut_editors[action] = editor
+            grid_layout.addWidget(editor, row, 1)
+            
+            row += 1
+        
+        # 添加重置按钮
+        reset_btn = QPushButton("重置为默认")
+        def reset_shortcuts():
+            self.settings.reset_shortcuts()
+            for action, editor in shortcut_editors.items():
+                editor.setText(self.settings.load_shortcut(action))
+        reset_btn.clicked.connect(reset_shortcuts)
+        
+        shortcut_group.setLayout(grid_layout)
+        shortcut_layout.addWidget(shortcut_group)
+        shortcut_layout.addWidget(reset_btn)
+        
+        # 添加选项卡
+        tab_widget.addTab(basic_tab, "基本设置")
+        tab_widget.addTab(shortcut_tab, "快捷键设置")
+        layout.addWidget(tab_widget)
+        
         # 确定取消按钮
         buttons = QDialogButtonBox(
             QDialogButtonBox.Ok | QDialogButtonBox.Cancel,
@@ -611,13 +703,10 @@ class FakeConsole(QMainWindow):
         
         buttons.accepted.connect(dialog.accept)
         buttons.rejected.connect(dialog.reject)
-        
-        layout.addWidget(dir_group)
-        layout.addWidget(status_check)
         layout.addWidget(buttons)
         
         if dialog.exec_() == QDialog.Accepted:
-            # 保存设置
+            # 保存基本设置
             new_dir = dir_label.text()
             if new_dir != self.file_manager.novel_dir:
                 try:
@@ -631,6 +720,15 @@ class FakeConsole(QMainWindow):
             show_status = status_check.isChecked()
             self.settings.save_show_status(show_status)
             self.status_label.setVisible(show_status)
+            
+            # 保存快捷键设置
+            for action, editor in shortcut_editors.items():
+                new_shortcut = editor.text()
+                if new_shortcut:
+                    self.settings.save_shortcut(action, new_shortcut)
+            
+            # 更新快捷键
+            self.setupShortcuts()
 
     def sync_content_to_main(self):
         """将信息面板的内容同步到主窗口"""
