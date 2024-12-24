@@ -50,10 +50,16 @@ class FileManager:
         return False
 
     def save_content(self, content):
+        """保存内容到文件"""
         if self.current_file is None:
             raise ValueError("No file is currently open")
-        with open(self.current_file, 'a', encoding='utf-8') as f:
-            f.write(content + '\n')
+        try:
+            with open(self.current_file, 'a', encoding='utf-8') as f:
+                timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                f.write(f"{content}\n")  
+            return True
+        except Exception as e:
+            raise Exception(f"保存失败: {str(e)}")
 
     def update_novel_directory(self, new_path):
         self.novel_dir = new_path

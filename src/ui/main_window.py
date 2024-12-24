@@ -17,6 +17,10 @@ class FakeConsole(QMainWindow):
         super().__init__()
         self.setWindowFlags(Qt.Window)
         
+        # 初始化撤销栈
+        self.undo_stack = []
+        self.max_undo_steps = 50  # 最大撤销步数
+        
         # 初始化核心组件
         self.settings = Settings()
         self.file_manager = FileManager(self.settings)
@@ -235,22 +239,15 @@ class FakeConsole(QMainWindow):
             ('Ctrl+M', self.showMinimized),
             ('Ctrl+H', self.showHelp),
             ('Ctrl+B', self.toggleToolBar),
-            ('Ctrl+D', self.list_files),
-            ('Ctrl+O', self.open_file),
-            ('Ctrl+N', self.create_new_file),
+            ('Ctrl+S', self.manual_save),
             ('Ctrl+R', self.show_current_content),
+            ('Ctrl+Z', self.undo_last_input),
+            ('Esc', self.close_editor_panel)
         ]
         
         for key, callback in shortcuts:
             shortcut = QShortcut(key, self)
             shortcut.activated.connect(callback)
-        
-        # 添加关闭和重新打开信息面板的快捷键
-        close_info_shortcut = QShortcut(QKeySequence('Esc'), self)
-        close_info_shortcut.activated.connect(self.close_info_panel)
-        
-        reopen_info_shortcut = QShortcut(QKeySequence('Alt+Q'), self)
-        reopen_info_shortcut.activated.connect(self.reopen_info_panel)
 
     def close_info_panel(self):
         """关闭编辑器面板"""
@@ -325,10 +322,17 @@ class FakeConsole(QMainWindow):
 
     def _format_and_insert_text(self, text):
         """处理文件操作相关的信息显示"""
-        if self.settings.load_show_status():
-            self.status_label.setText(text.strip())
+        # 如果是文件操作相关的信息（包含特定标记），且状态栏被禁用，则不显示
+        if any(tag in text for tag in ['[ERROR]', '[WARNING]', '[SUCCESS]', '[INFO]']):
+            if not self.settings.load_show_status():
+                return  # 直接返回，不显示任何信息
+            
+            # 添加时间戳并显示在状态栏
+            timestamp = datetime.now().strftime('%H:%M:%S')
+            formatted_text = f"[{timestamp}] {text}"
+            self.status_label.setText(formatted_text.strip())
         else:
-            # 如果状态栏被禁用，将信息显示在控制台
+            # 其他类型的信息（如下载信息）正常显示在控制台
             cursor = self.console.textCursor()
             format = QTextCharFormat()
             
@@ -349,16 +353,31 @@ class FakeConsole(QMainWindow):
     def process_input(self):
         """处理输入内容"""
         if not self.file_manager.current_file:
-            self._format_and_insert_text("[ERROR] 请先创建或打开文件\n")
+            self._format_and_insert_text("[ERROR] 请先创建或打开文件")
             return
-        
-        text = self.input_line.text()
+            
+        text = self.input_line.text().strip()
         if text:
-            self.file_manager.save_content(text)
-            # 如果编辑器面板正在显示当前文件，更新其内容
-            if self.editor_panel.isVisible():
-                self.show_current_content()
-            self.input_line.clear()
+            try:
+                # 保存当前状态用于撤销
+                self.save_for_undo()
+                
+                # 读取当前文件内容
+                with open(self.file_manager.current_file, 'r', encoding='utf-8') as f:
+                    current_content = f.read()
+                
+                # 追加新内容
+                with open(self.file_manager.current_file, 'w', encoding='utf-8') as f:
+                    f.write(current_content + text + '\n')
+                
+                self._format_and_insert_text(f"[SUCCESS] 内容已保存")
+                self.input_line.clear()
+                
+                # 如果编辑器面板打开，更新显示
+                if self.editor_panel.isVisible():
+                    self.show_current_content()
+            except Exception as e:
+                self._format_and_insert_text(f"[ERROR] {str(e)}")
 
     def showHelp(self):
         help_text = """
@@ -367,47 +386,33 @@ class FakeConsole(QMainWindow):
     Ctrl+M : 最小化窗口
     Ctrl+H : 显示帮助信息
     Ctrl+B : 显示/隐藏工具栏
-    Ctrl+D : 显示文件列表
-    Ctrl+O : 打开文件
-    Ctrl+N : 新建文件
+    Ctrl+S : 保存当前内容
     Ctrl+R : 显示当前文件内容
-    Esc   : 关闭信息窗口
-    Alt+Q : 重新打开上次关闭的窗口
+    Ctrl+Z : 撤销上一次输入
+    Esc   : 关闭编辑器窗口
     
-[INFO] 写作提示:
-    - 所有输入内容会自动保存到当前文件
+[INFO] 使用说明:
+    - 在文件树中右键可以新建或删除文件
+    - 双击文件可以打开
+    - 所有输入内容会自动保存
     - 每60秒自动保存一次
 """
         self._format_and_insert_text(help_text)
 
-    def list_files(self):
-        """显示小说目录下的所有文件"""
-        # 不再需要这个方法，因为现在使用文件树显示文件列表
-        pass
-
-    def _handle_file_click(self, url):
-        """处理文件点击事件"""
-        # 不再需要这个方法，因为现在使用文件树处理文件打开
-        pass
-
-    def create_new_file(self):
-        pass
-
-    def open_file(self):
-        pass
-
     def show_current_content(self):
         """显示当前文件内容"""
         try:
+            if not self.file_manager.current_file:
+                return
+            
             with open(self.file_manager.current_file, 'r', encoding='utf-8') as f:
                 content = f.read()
             
-            # 使用编辑器面板显示内容
+            # 更新编辑器面板内容
             self.editor_panel.set_content(
                 f"文件内容 - {os.path.basename(self.file_manager.current_file)}", 
                 content
             )
-            # 显示编辑器面板
             self.editor_panel.show()
             
             # 调整编辑器面板位置
@@ -417,7 +422,7 @@ class FakeConsole(QMainWindow):
             )
             
         except Exception as e:
-            self._format_and_insert_text(f"[ERROR] 读取文件时出错: {str(e)}\n")
+            self._format_and_insert_text(f"[ERROR] 读取文件时出错: {str(e)}")
 
     def clearConsole(self):
         self.console.clear()
@@ -429,14 +434,30 @@ class FakeConsole(QMainWindow):
             self.toolbar_widget.show()
 
     def auto_save(self):
-        if self.input_line.text():
-            self.manual_save()
+        """自动保存功能"""
+        if self.file_manager.current_file and self.input_line.text():
+            try:
+                text = self.input_line.text()
+                if self.file_manager.save_content(text):
+                    self._format_and_insert_text(f"[SUCCESS] 内容已自动保存")
+                    # 如果编辑器面板正在显示当前文件，更新其内容
+                    if self.editor_panel.isVisible():
+                        self.show_current_content()
+            except Exception as e:
+                self._format_and_insert_text(f"[ERROR] 自动保存失败: {str(e)}")
 
     def manual_save(self):
+        """手动保存功能"""
+        if not self.file_manager.current_file:
+            return
+        
         text = self.input_line.text()
         if text:
-            self.file_manager.save_content(text)
-            self._format_and_insert_text(f"[SUCCESS] 内容已保存\n")
+            try:
+                self.file_manager.save_content(text)
+                self._format_and_insert_text(f"[SUCCESS] 内容已保存")
+            except Exception as e:
+                self._format_and_insert_text(f"[ERROR] 保存失败: {str(e)}")
 
     def loadSettings(self):
         geometry = self.settings.load_geometry()
@@ -448,10 +469,6 @@ class FakeConsole(QMainWindow):
         self.auto_save_timer.stop()
         self.download_thread.running = False
         event.accept()
-
-    def show_info_panel(self, title=None, content=None):
-        """不再需要这个方法，使用编辑器面板代替"""
-        pass
 
     def show_settings(self):
         """显示设置对话框"""
@@ -550,7 +567,85 @@ class FakeConsole(QMainWindow):
             except Exception as e:
                 self._format_and_insert_text(f"[ERROR] 保存失败: {str(e)}\n")
 
-    def on_editor_content_changed(self, content):
+    def on_editor_content_changed(self):
         """处理编辑器内容变化"""
+        if not hasattr(self, '_is_updating_editor'):
+            self._is_updating_editor = False
+        
+        if not self._is_updating_editor and self.file_manager.current_file:
+            try:
+                # 保存当前状态用于撤销
+                self.save_for_undo()
+                
+                # 保存编辑器内容
+                content = self.editor_panel.get_content()
+                with open(self.file_manager.current_file, 'w', encoding='utf-8') as f:
+                    f.write(content)
+            except Exception as e:
+                self._format_and_insert_text(f"[ERROR] 保存失败: {str(e)}")
+
+    def save_for_undo(self):
+        """保存当前文件状态用于撤销"""
         if self.file_manager.current_file:
-            self.save_current_file()
+            try:
+                # 读取当前文件内容
+                try:
+                    with open(self.file_manager.current_file, 'r', encoding='utf-8') as f:
+                        current_content = f.read()
+                except:
+                    current_content = ""
+                
+                # 将当前状态保存到撤销栈
+                self.undo_stack.append(current_content)
+                # 限制撤销栈大小
+                if len(self.undo_stack) > self.max_undo_steps:
+                    self.undo_stack.pop(0)
+            except Exception as e:
+                self._format_and_insert_text(f"[ERROR] 保存撤销状态失败: {str(e)}")
+
+    def undo_last_input(self):
+        """撤销上一次操作"""
+        if not self.undo_stack:
+            self._format_and_insert_text("[WARNING] 没有可撤销的操作")
+            return
+            
+        try:
+            if self.file_manager.current_file:
+                # 获取上一个状态
+                previous_content = self.undo_stack.pop()
+                
+                # 恢复文件内容
+                with open(self.file_manager.current_file, 'w', encoding='utf-8') as f:
+                    f.write(previous_content)
+                
+                self._format_and_insert_text("[SUCCESS] 已撤销上一次操作")
+                
+                # 如果编辑器面板打开，更新显示
+                if self.editor_panel.isVisible():
+                    self._is_updating_editor = True
+                    try:
+                        self.show_current_content()
+                    finally:
+                        self._is_updating_editor = False
+        except Exception as e:
+            self._format_and_insert_text(f"[ERROR] 撤销失败: {str(e)}")
+
+    def close_editor_panel(self):
+        """关闭编辑器面板"""
+        if hasattr(self, 'editor_panel') and self.editor_panel.isVisible():
+            # 保存当前编辑器内容
+            if self.file_manager.current_file:
+                content = self.editor_panel.get_content()
+                try:
+                    # 保存当前状态用于撤销
+                    self.save_for_undo()
+                    
+                    # 保存编辑器内容
+                    with open(self.file_manager.current_file, 'w', encoding='utf-8') as f:
+                        f.write(content)
+                    self._format_and_insert_text("[SUCCESS] 内容已保存")
+                except Exception as e:
+                    self._format_and_insert_text(f"[ERROR] 保存失败: {str(e)}")
+            
+            # 隐藏编辑器面板
+            self.editor_panel.hide()

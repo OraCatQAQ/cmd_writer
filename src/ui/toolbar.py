@@ -54,7 +54,6 @@ class ToolBar(QWidget):
         button_layout.setSpacing(2)
         
         self.buttons = []
-        self.add_button("📁 新建文件", "创建新文件 (Ctrl+N)", self.parent.create_new_file, button_layout)
         self.add_button("💾 保存", "保存当前文件 (Ctrl+S)", self.parent.save_current_file, button_layout)
         self.add_button("⚙️ 设置", "设置保存目录", self.parent.show_settings, button_layout)
         
