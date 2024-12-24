@@ -7,7 +7,6 @@ class EditorPanel(QWidget):
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.parent = parent  # 保存父窗口引用
         self.setup_ui()
         
     def setup_ui(self):
@@ -69,13 +68,6 @@ class EditorPanel(QWidget):
         layout.addWidget(title_bar)
         layout.addWidget(self.editor)
         
-    def keyPressEvent(self, event):
-        """处理按键事件"""
-        if event.key() == Qt.Key_Escape:
-            self.hide()
-        else:
-            super().keyPressEvent(event)
-    
     def _on_text_changed(self):
         self.content_changed.emit(self.editor.toPlainText())
         

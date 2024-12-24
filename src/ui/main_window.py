@@ -25,6 +25,10 @@ class FakeConsole(QMainWindow):
         self.settings = Settings()
         self.file_manager = FileManager(self.settings)
         
+        # 添加行编辑相关的属性
+        self.current_line_number = -1  # 当前编辑的行号，-1表示新行
+        self.file_lines = []  # 文件的所有行
+        
         self.initUI()
         self.loadSettings()
         
@@ -351,31 +355,128 @@ class FakeConsole(QMainWindow):
             cursor.insertText(text, format)
 
     def process_input(self):
-        """处理输入内容"""
+        """处理回车输入"""
         if not self.file_manager.current_file:
             self._format_and_insert_text("[ERROR] 请先创建或打开文件")
             return
             
+        # 保存当前行
+        self.save_current_line()
+        
+        # 清空输入框
+        self.input_line.clear()
+        
+        # 移动到下一行
+        if self.current_line_number >= 0:
+            self.move_to_line(self.current_line_number + 1)
+
+    def update_file_content(self, text):
+        """更新文件内容"""
+        try:
+            # 读取当前文件内容
+            with open(self.file_manager.current_file, 'r', encoding='utf-8') as f:
+                self.file_lines = f.read().splitlines()
+            
+            # 更新或插入内容
+            if self.current_line_number >= 0:
+                # 修改现有行
+                if self.current_line_number < len(self.file_lines):
+                    if text:  # 有内容则更新
+                        self.file_lines[self.current_line_number] = text
+                    else:  # 空内容则删除该行
+                        self.file_lines.pop(self.current_line_number)
+            else:
+                # 添加新行
+                if text:
+                    self.file_lines.append(text)
+            
+            # 保存回文件
+            with open(self.file_manager.current_file, 'w', encoding='utf-8') as f:
+                f.write('\n'.join(self.file_lines))
+                if self.file_lines:  # 确保最后有换行符
+                    f.write('\n')
+                    
+        except Exception as e:
+            raise Exception(f"更新文件内容失败: {str(e)}")
+    
+    def move_to_line(self, line_number):
+        """移动到指定行"""
+        try:
+            with open(self.file_manager.current_file, 'r', encoding='utf-8') as f:
+                self.file_lines = f.read().splitlines()
+            
+            # 如果是最后一行之后，切换到新行模式
+            if line_number >= len(self.file_lines):
+                self.current_line_number = -1
+                self.input_line.clear()
+                self.input_line.setPlaceholderText("输入新内容...")
+                return
+            
+            # 如果是有效行号，显示该行内容
+            if line_number >= 0 and line_number < len(self.file_lines):
+                self.current_line_number = line_number
+                self.input_line.setText(self.file_lines[line_number])
+                self.input_line.setPlaceholderText(f"正在编辑第 {line_number + 1} 行...")
+                
+        except Exception as e:
+            self._format_and_insert_text(f"[ERROR] 移动到指定行失败: {str(e)}")
+    
+    def keyPressEvent(self, event):
+        """处理键盘事件"""
+        if not self.file_manager.current_file:
+            super().keyPressEvent(event)
+            return
+            
+        if event.key() == Qt.Key_Up:
+            # 先保存当前行的修改
+            self.save_current_line()
+            # 向上移动一行
+            if self.current_line_number == -1:
+                # 如果当前在新行模式，移动到最后一行
+                self.move_to_line(len(self.file_lines) - 1)
+            else:
+                # 否则移动到上一行
+                self.move_to_line(max(0, self.current_line_number - 1))
+                
+        elif event.key() == Qt.Key_Down:
+            # 先保存当前行的修改
+            self.save_current_line()
+            # 向下移动一行
+            if self.current_line_number == -1:
+                # 如果当前在新行模式，保持在新行
+                return
+            # 移动到下一行或新行模式
+            self.move_to_line(self.current_line_number + 1)
+            
+        elif event.key() == Qt.Key_Delete and self.current_line_number >= 0:
+            # 删除当前行
+            self.save_for_undo()
+            self.update_file_content("")  # 传入空字符串表示删除
+            self.move_to_line(self.current_line_number)  # 保持在当前位置
+            
+        else:
+            super().keyPressEvent(event)
+
+    def save_current_line(self):
+        """保存当前行的修改"""
+        if not self.file_manager.current_file:
+            return
+        
         text = self.input_line.text().strip()
-        if text:
+        if text or self.current_line_number >= 0:  # 允许空行修改
             try:
                 # 保存当前状态用于撤销
                 self.save_for_undo()
                 
-                # 读取当前文件内容
-                with open(self.file_manager.current_file, 'r', encoding='utf-8') as f:
-                    current_content = f.read()
+                # 更新文件内容
+                self.update_file_content(text)
                 
-                # 追加新内容
-                with open(self.file_manager.current_file, 'w', encoding='utf-8') as f:
-                    f.write(current_content + text + '\n')
+                self._format_and_insert_text("[SUCCESS] 内容已保存")
                 
-                self._format_and_insert_text(f"[SUCCESS] 内容已保存")
-                self.input_line.clear()
-                
-                # 如果编辑器面板打开，更新显示
+                # 更新编辑器面板内容
                 if self.editor_panel.isVisible():
                     self.show_current_content()
+                    
             except Exception as e:
                 self._format_and_insert_text(f"[ERROR] {str(e)}")
 
