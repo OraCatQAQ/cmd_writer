@@ -1,7 +1,7 @@
 import os
 from datetime import datetime
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, 
-                            QTextEdit, QLineEdit, QShortcut, QLabel, QScrollArea, QFrame, QPushButton, QHBoxLayout, QFileDialog)
+                            QTextEdit, QLineEdit, QShortcut, QLabel, QScrollArea, QFrame, QPushButton, QHBoxLayout, QFileDialog, QTextBrowser, QDialog, QGroupBox, QDialogButtonBox, QCheckBox)
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QIcon, QTextCharFormat, QColor, QTextCursor, QKeySequence
 
@@ -10,6 +10,7 @@ from core.file_manager import FileManager
 from threads.download_thread import DownloadThread
 from ui.toolbar import ToolBar
 from ui.styles import MAIN_WINDOW_STYLE, CONSOLE_STYLE, INPUT_LINE_STYLE
+from ui.editor_panel import EditorPanel
 
 class FakeConsole(QMainWindow):
     def __init__(self):
@@ -36,19 +37,25 @@ class FakeConsole(QMainWindow):
         self.download_thread.update_signal.connect(self.update_download_info)
         self.download_thread.start()
         
-        # 创建并初始化工具栏和信息面板
-        self.setupToolBar()
-        self.setupInfoPanel()
-        self.toolbar_widget.hide()
-        self.info_panel.hide()
+        # 创建并初始化工具栏和编辑器面板
+        self.toolbar_widget = ToolBar(self)
+        self.editor_panel = EditorPanel(self)
+        self.editor_panel.content_changed.connect(self.on_editor_content_changed)
+        
+        # 设置工具栏位置
+        self.toolbar_widget.move(0, 0)
+        self.toolbar_widget.show()
+        
+        # 设置编辑器面板位置
+        self.editor_panel.hide()
         
         # 初始状态下禁用输入
         self.input_line.setEnabled(False)
-        self.input_line.setPlaceholderText("请先创建或打开文件 (Ctrl+N / Ctrl+O)")
+        self.input_line.setPlaceholderText("请先创建或打开文件")
 
     def initUI(self):
         # 设置窗口
-        self.setWindowTitle('命令提示符')
+        self.setWindowTitle('C:\Windows\System32\cmd.exe')
         self.setGeometry(100, 100, 800, 600)
         
         # 创建中央部件
@@ -63,6 +70,22 @@ class FakeConsole(QMainWindow):
         self.console.setReadOnly(True)
         self.console.setStyleSheet(CONSOLE_STYLE)
         layout.addWidget(self.console)
+        
+        # 创建状态信息显示区域
+        self.status_label = QLabel()
+        self.status_label.setStyleSheet("""
+            QLabel {
+                background-color: black;
+                color: #00ff00;
+                font-family: 'Consolas';
+                font-size: 14px;
+                padding: 5px 10px;
+                border-top: 1px solid #333;
+                border-bottom: 1px solid #333;
+            }
+        """)
+        layout.addWidget(self.status_label)
+        self.status_label.setVisible(self.settings.load_show_status())
         
         # 创建输入区域
         self.input_line = QLineEdit()
@@ -165,20 +188,29 @@ class FakeConsole(QMainWindow):
         content_widget.setStyleSheet("background-color: black;")
         content_layout = QVBoxLayout(content_widget)
         
-        # 将 QLabel 替换为 QTextEdit
-        self.info_text = QTextEdit()
-        self.info_text.setReadOnly(False)  # 允许编辑
+        # 使用 QTextBrowser 替代 QTextEdit
+        self.info_text = QTextBrowser()
+        self.info_text.setOpenExternalLinks(False)  # 禁止打开外部链接
         self.info_text.setStyleSheet("""
-            QTextEdit {
+            QTextBrowser {
                 color: white;
                 background-color: black;
                 border: none;
                 padding: 10px;
                 font-family: Consolas, Monaco, monospace;
             }
+            QTextBrowser a {
+                color: #00aaff;
+                text-decoration: none;
+            }
+            QTextBrowser a:hover {
+                color: #55ccff;
+                text-decoration: underline;
+            }
         """)
-        # 连接文本变化信号
-        self.info_text.textChanged.connect(self.sync_content_to_main)
+        
+        # 连接链接点击信号
+        self.info_text.anchorClicked.connect(self._handle_file_click)
         content_layout.addWidget(self.info_text)
         
         # 将内容部件设置到滚动区域
@@ -221,48 +253,59 @@ class FakeConsole(QMainWindow):
         reopen_info_shortcut.activated.connect(self.reopen_info_panel)
 
     def close_info_panel(self):
-        """关闭信息面板并保存状态"""
-        if self.info_panel.isVisible():
-            self.last_info_state = {
-                'title': self.info_title.text(),
-                'content': self.info_text.toPlainText(),
-                'readonly': self.info_text.isReadOnly()
+        """关闭编辑器面板"""
+        if self.editor_panel.isVisible():
+            self.last_editor_state = {
+                'title': self.editor_panel.title_label.text(),
+                'content': self.editor_panel.get_content()
             }
-            self.info_panel.hide()
+            self.editor_panel.hide()
 
     def reopen_info_panel(self):
-        """重新打开上次关闭的信息面板"""
-        if hasattr(self, 'last_info_state') and self.last_info_state:
-            self.info_text.setReadOnly(self.last_info_state['readonly'])
-            self.show_info_panel(
-                self.last_info_state['title'],
-                self.last_info_state['content']
+        """重新打开编辑器面板"""
+        if hasattr(self, 'last_editor_state') and self.last_editor_state:
+            self.editor_panel.set_content(
+                self.last_editor_state['title'],
+                self.last_editor_state['content']
+            )
+            self.editor_panel.show()
+            # 调整编辑器面板位置
+            self.editor_panel.move(
+                self.width() - self.editor_panel.width() - 10,
+                50
             )
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
         if hasattr(self, 'toolbar_widget'):
-            # 将工具栏放在右边
+            # 将工具栏放在左边，并且高度与窗口一致
             self.toolbar_widget.setGeometry(
-                self.width() - 40, 0, 40, self.height()
+                0, 0, 250, self.height()
             )
+            # 调整编辑器面板位置
+            if hasattr(self, 'editor_panel'):
+                self.editor_panel.move(
+                    self.width() - self.editor_panel.width() - 10,
+                    50
+                )
 
     def update_download_info(self, text):
+        """处理下载信息的显示"""
         if text.startswith('\r'):
             cursor = self.console.textCursor()
             cursor.movePosition(QTextCursor.End)
             cursor.movePosition(QTextCursor.StartOfLine, QTextCursor.KeepAnchor)
             cursor.removeSelectedText()
-            self._format_and_insert_text(text.lstrip('\r'))
+            self._insert_download_text(text.lstrip('\r'))
         else:
-            self._format_and_insert_text(text + '\n')
+            self._insert_download_text(text + '\n')
         
         self.console.verticalScrollBar().setValue(
             self.console.verticalScrollBar().maximum()
         )
 
-    def _format_and_insert_text(self, text):
-        # 恢复原来的格式化逻辑
+    def _insert_download_text(self, text):
+        """在控制台插入下载相关的文本"""
         cursor = self.console.textCursor()
         format = QTextCharFormat()
         
@@ -280,40 +323,41 @@ class FakeConsole(QMainWindow):
         cursor.movePosition(QTextCursor.End)
         cursor.insertText(text, format)
 
+    def _format_and_insert_text(self, text):
+        """处理文件操作相关的信息显示"""
+        if self.settings.load_show_status():
+            self.status_label.setText(text.strip())
+        else:
+            # 如果状态栏被禁用，将信息显示在控制台
+            cursor = self.console.textCursor()
+            format = QTextCharFormat()
+            
+            if '[ERROR]' in text:
+                format.setForeground(QColor('#ff5555'))
+            elif '[WARNING]' in text:
+                format.setForeground(QColor('#ffb86c'))
+            elif '[SUCCESS]' in text:
+                format.setForeground(QColor('#50fa7b'))
+            elif '[INFO]' in text:
+                format.setForeground(QColor('#8be9fd'))
+            else:
+                format.setForeground(QColor('#f8f8f2'))
+            
+            cursor.movePosition(QTextCursor.End)
+            cursor.insertText(text, format)
+
     def process_input(self):
-        if not hasattr(self.file_manager, 'current_file'):
+        """处理输入内容"""
+        if not self.file_manager.current_file:
             self._format_and_insert_text("[ERROR] 请先创建或打开文件\n")
             return
         
         text = self.input_line.text()
         if text:
-            if hasattr(self, 'waiting_for_filename') and self.waiting_for_filename:
-                success, filepath = self.file_manager.create_file(text)
-                if success:
-                    self._format_and_insert_text(f"[SUCCESS] 已创建新文件: {os.path.basename(filepath)}\n")
-                    self.input_line.setEnabled(True)
-                    self.input_line.setPlaceholderText("输入内容后按回车...")
-                else:
-                    self._format_and_insert_text(f"[WARNING] 文件已存在: {os.path.basename(filepath)}\n")
-                self.waiting_for_filename = False
-                
-            elif hasattr(self, 'waiting_for_open') and self.waiting_for_open:
-                if self.file_manager.open_file(text):
-                    self._format_and_insert_text(f"[SUCCESS] 已切换到文件: {text}\n")
-                    self.input_line.setEnabled(True)
-                    self.input_line.setPlaceholderText("输入内容后按回车...")
-                    # 打开文件后自动显示内容
-                    self.show_current_content()
-                else:
-                    self._format_and_insert_text(f"[ERROR] 文件不存在: {text}\n")
-                self.waiting_for_open = False
-                
-            else:
-                self.file_manager.save_content(text)
-                # 如果信息面板正在显示当前文件，更新其内容
-                if self.info_panel.isVisible():
-                    self.show_current_content()
-            
+            self.file_manager.save_content(text)
+            # 如果编辑器面板正在显示当前文件，更新其内容
+            if self.editor_panel.isVisible():
+                self.show_current_content()
             self.input_line.clear()
 
     def showHelp(self):
@@ -338,33 +382,19 @@ class FakeConsole(QMainWindow):
 
     def list_files(self):
         """显示小说目录下的所有文件"""
-        files = self.file_manager.list_files()
-        content = ""
-        if not files:
-            content = "目录为空"
-        else:
-            for file in files:
-                content += (
-                    f"{file['name']:<30} "
-                    f"大小: {file['size']/1024:.1f} KB\n"
-                    f"修改时间: {file['modified'].strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-                )
-        
-        # 文件列表保持只读
-        self.info_text.setReadOnly(True)
-        self.show_info_panel("文件列表", content)
+        # 不再需要这个方法，因为现在使用文件树显示文件列表
+        pass
+
+    def _handle_file_click(self, url):
+        """处理文件点击事件"""
+        # 不再需要这个方法，因为现在使用文件树处理文件打开
+        pass
 
     def create_new_file(self):
-        self._format_and_insert_text("\n[INFO] 请输入新文件名 (不需要输入.txt后缀):")
-        self.input_line.setEnabled(True)
-        self.input_line.setPlaceholderText("输入文件名后按回车...")
-        self.waiting_for_filename = True
+        pass
 
     def open_file(self):
-        self._format_and_insert_text("\n[INFO] 请输入要打开的文件名:")
-        self.input_line.setEnabled(True)
-        self.input_line.setPlaceholderText("输入文件名后按回车...")
-        self.waiting_for_open = True
+        pass
 
     def show_current_content(self):
         """显示当前文件内容"""
@@ -372,14 +402,20 @@ class FakeConsole(QMainWindow):
             with open(self.file_manager.current_file, 'r', encoding='utf-8') as f:
                 content = f.read()
             
-            # 更新信息面板标题和内容
-            self.info_title.setText(f"文件内容 - {os.path.basename(self.file_manager.current_file)}")
-            self.info_text.setPlainText(content)
-            # 设置为可编辑模式
-            self.info_text.setReadOnly(False)
+            # 使用编辑器面板显示内容
+            self.editor_panel.set_content(
+                f"文件内容 - {os.path.basename(self.file_manager.current_file)}", 
+                content
+            )
+            # 显示编辑器面板
+            self.editor_panel.show()
             
-            # 显示面板
-            self.show_info_panel()
+            # 调整编辑器面板位置
+            self.editor_panel.move(
+                self.width() - self.editor_panel.width() - 10,
+                50
+            )
+            
         except Exception as e:
             self._format_and_insert_text(f"[ERROR] 读取文件时出错: {str(e)}\n")
 
@@ -414,34 +450,69 @@ class FakeConsole(QMainWindow):
         event.accept()
 
     def show_info_panel(self, title=None, content=None):
-        """显示信息面板"""
-        # 计算窗口位置（在工具栏左侧显示）
-        x = self.width() - 440
-        y = 50
-        self.info_panel.move(x, y)
-        
-        if title:
-            self.info_title.setText(title)
-        if content:
-            self.info_text.setPlainText(content)
-        
-        self.info_panel.show()
+        """不再需要这个方法，使用编辑器面板代替"""
+        pass
 
     def show_settings(self):
-        current_dir = self.file_manager.novel_dir
-        new_dir = QFileDialog.getExistingDirectory(
-            self,
-            "选择保存目录",
-            current_dir,
-            QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks
+        """显示设置对话框"""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("设置")
+        dialog.setFixedSize(400, 200)
+        
+        layout = QVBoxLayout(dialog)
+        
+        # 目录设置
+        dir_group = QGroupBox("文件保存目录")
+        dir_layout = QHBoxLayout()
+        dir_label = QLineEdit(self.file_manager.novel_dir)
+        dir_label.setReadOnly(True)
+        dir_button = QPushButton("选择目录")
+        
+        def choose_dir():
+            new_dir = QFileDialog.getExistingDirectory(
+                self, "选择保存目录", self.file_manager.novel_dir,
+                QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks
+            )
+            if new_dir:
+                dir_label.setText(new_dir)
+        
+        dir_button.clicked.connect(choose_dir)
+        dir_layout.addWidget(dir_label)
+        dir_layout.addWidget(dir_button)
+        dir_group.setLayout(dir_layout)
+        
+        # 状态显示设置
+        status_check = QCheckBox("显示状态信息")
+        status_check.setChecked(self.settings.load_show_status())
+        
+        # 确定取消按钮
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel,
+            Qt.Horizontal, dialog
         )
         
-        if new_dir:
-            try:
-                self.file_manager.update_novel_directory(new_dir)
-                self._format_and_insert_text(f"[SUCCESS] 已更新保存目录: {new_dir}\n")
-            except Exception as e:
-                self._format_and_insert_text(f"[ERROR] 更新目录失败: {str(e)}\n")
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        
+        layout.addWidget(dir_group)
+        layout.addWidget(status_check)
+        layout.addWidget(buttons)
+        
+        if dialog.exec_() == QDialog.Accepted:
+            # 保存设置
+            new_dir = dir_label.text()
+            if new_dir != self.file_manager.novel_dir:
+                try:
+                    self.file_manager.update_novel_directory(new_dir)
+                    self.toolbar_widget.set_root_path(new_dir)
+                    self._format_and_insert_text(f"[SUCCESS] 已更新保存目录: {new_dir}\n")
+                except Exception as e:
+                    self._format_and_insert_text(f"[ERROR] 更新目录失败: {str(e)}\n")
+            
+            # 保存状态显示设置
+            show_status = status_check.isChecked()
+            self.settings.save_show_status(show_status)
+            self.status_label.setVisible(show_status)
 
     def sync_content_to_main(self):
         """将信息面板的内容同步到主窗口"""
@@ -450,6 +521,10 @@ class FakeConsole(QMainWindow):
         
         self.syncing = True
         try:
+            if self.file_manager.current_file is None:
+                self._format_and_insert_text("[ERROR] 请先创建或打开文件\n")
+                return
+            
             current_file = self.file_manager.current_file
             content = self.info_text.toPlainText()
             
@@ -459,5 +534,23 @@ class FakeConsole(QMainWindow):
                 
             # 更新主窗口显示
             self._format_and_insert_text("[INFO] 内容已同步\n")
+        except Exception as e:
+            self._format_and_insert_text(f"[ERROR] 同步失败: {str(e)}\n")
         finally:
             self.syncing = False
+
+    def save_current_file(self):
+        """保存当前文件"""
+        if self.file_manager.current_file:
+            content = self.editor_panel.get_content()
+            try:
+                with open(self.file_manager.current_file, 'w', encoding='utf-8') as f:
+                    f.write(content)
+                self._format_and_insert_text("[SUCCESS] 文件已保存\n")
+            except Exception as e:
+                self._format_and_insert_text(f"[ERROR] 保存失败: {str(e)}\n")
+
+    def on_editor_content_changed(self, content):
+        """处理编辑器内容变化"""
+        if self.file_manager.current_file:
+            self.save_current_file()

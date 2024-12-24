@@ -6,15 +6,15 @@ class FileManager:
         self.settings = settings
         self.novel_dir = self.settings.load_novel_directory()
         self.ensure_novel_directory()
-        self.current_file = self.create_default_file()
+        self.current_file = None
 
     def ensure_novel_directory(self):
         if not os.path.exists(self.novel_dir):
             os.makedirs(self.novel_dir)
 
-    def create_default_file(self):
-        filename = f"我的小说_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
-        return os.path.join(self.novel_dir, filename)
+#    def create_default_file(self):
+#        filename = f"我的小说_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+#        return os.path.join(self.novel_dir, filename)
 
     def list_files(self):
         files = []
@@ -50,11 +50,12 @@ class FileManager:
         return False
 
     def save_content(self, content):
+        if self.current_file is None:
+            raise ValueError("No file is currently open")
         with open(self.current_file, 'a', encoding='utf-8') as f:
-            f.write(content + '\n') 
+            f.write(content + '\n')
 
     def update_novel_directory(self, new_path):
         self.novel_dir = new_path
         self.settings.save_novel_directory(new_path)
-        self.ensure_novel_directory()
-        self.current_file = self.create_default_file()
+        self.ensure_novel_directory()#        self.current_file = self.create_default_file()

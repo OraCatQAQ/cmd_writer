@@ -16,4 +16,10 @@ class Settings:
 
     def load_novel_directory(self):
         default_path = os.path.join(os.path.expanduser('~'), 'novels')
-        return self.settings.value('novel_directory', default_path) 
+        return self.settings.value('novel_directory', default_path)
+        
+    def save_show_status(self, show):
+        self.settings.setValue('show_status', show)
+        
+    def load_show_status(self):
+        return self.settings.value('show_status', True, type=bool) 
