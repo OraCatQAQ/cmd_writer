@@ -107,136 +107,6 @@ class FakeConsole(QMainWindow):
         # 设置快捷键
         self.setupShortcuts()
         
-        # 修改输入框提示文本
-        self.input_line.setPlaceholderText("按 Ctrl+H 查看帮助信息")
-
-    def setupToolBar(self):
-        self.toolbar_widget = ToolBar(self)
-        
-        # 添加工具按钮
-        buttons = [
-            ('📁', '查看文件列表 (Ctrl+D)', self.list_files),
-            ('📝', '新建文件 (Ctrl+N)', self.create_new_file),
-            ('📂', '打开文件 (Ctrl+O)', self.open_file),
-            ('📄', '显示当前内容 (Ctrl+R)', self.show_current_content),
-            ('⚙️', '设置 ', self.show_settings),
-            ('❌', '关闭 (Ctrl+Q)', self.close),
-        ]
-        
-        for text, tooltip, callback in buttons:
-            self.toolbar_widget.add_button(text, tooltip, callback)
-
-    def setupInfoPanel(self):
-        # 创建信息窗口
-        self.info_panel = QWidget(self)
-        self.info_panel.setFixedSize(400, 500)
-        
-        # 创建布局
-        layout = QVBoxLayout(self.info_panel)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-        
-        # 创建标题栏
-        title_bar = QWidget()
-        title_bar.setFixedHeight(30)
-        title_bar.setStyleSheet("background-color: black;")
-        title_layout = QHBoxLayout(title_bar)
-        title_layout.setContentsMargins(10, 0, 0, 0)
-        
-        self.info_title = QLabel("文件信息")
-        self.info_title.setStyleSheet("color: white;")
-        close_btn = QPushButton("×")
-        close_btn.setFixedSize(30, 30)
-        close_btn.setStyleSheet("""
-            QPushButton {
-                background-color: black;
-                color: white;
-                border: none;
-                font-size: 16px;
-            }
-            QPushButton:hover {
-                background-color: #c42b1c;
-            }
-        """)
-        close_btn.clicked.connect(self.info_panel.hide)
-        
-        title_layout.addWidget(self.info_title)
-        title_layout.addStretch()
-        title_layout.addWidget(close_btn)
-        
-        # 创建滚动区域
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setStyleSheet("""
-            QScrollArea {
-                border: none;
-                background-color: black;
-            }
-            QScrollBar:vertical {
-                border: none;
-                background: #2b2b2b;
-                width: 10px;
-                margin: 0px;
-            }
-            QScrollBar::handle:vertical {
-                background: #404040;
-                min-height: 20px;
-                border-radius: 5px;
-            }
-            QScrollBar::add-line:vertical {
-                height: 0px;
-            }
-            QScrollBar::sub-line:vertical {
-                height: 0px;
-            }
-        """)
-        
-        # 创建内容区域
-        content_widget = QWidget()
-        content_widget.setStyleSheet("background-color: black;")
-        content_layout = QVBoxLayout(content_widget)
-        
-        # 使用 QTextBrowser 替代 QTextEdit
-        self.info_text = QTextBrowser()
-        self.info_text.setOpenExternalLinks(False)  # 禁止打开外部链接
-        self.info_text.setStyleSheet("""
-            QTextBrowser {
-                color: white;
-                background-color: black;
-                border: none;
-                padding: 10px;
-                font-family: Consolas, Monaco, monospace;
-            }
-            QTextBrowser a {
-                color: #00aaff;
-                text-decoration: none;
-            }
-            QTextBrowser a:hover {
-                color: #55ccff;
-                text-decoration: underline;
-            }
-        """)
-        
-        # 连接链接点击信号
-        self.info_text.anchorClicked.connect(self._handle_file_click)
-        content_layout.addWidget(self.info_text)
-        
-        # 将内容部件设置到滚动区域
-        scroll_area.setWidget(content_widget)
-        
-        # 组装布局
-        layout.addWidget(title_bar)
-        layout.addWidget(scroll_area)
-        
-        # 设置窗口样式
-        self.info_panel.setStyleSheet("""
-            QWidget {
-                background-color: black;
-                border: 1px solid #333;
-            }
-        """)
-        self.info_panel.hide()
-
     def setupShortcuts(self):
         """设置快捷键"""
         # 清除现有的快捷键
@@ -265,28 +135,6 @@ class FakeConsole(QMainWindow):
                 shortcut.activated.connect(callback)
                 self._shortcuts.append(shortcut)
 
-    def close_info_panel(self):
-        """关闭编辑器面板"""
-        if self.editor_panel.isVisible():
-            self.last_editor_state = {
-                'title': self.editor_panel.title_label.text(),
-                'content': self.editor_panel.get_content()
-            }
-            self.editor_panel.hide()
-
-    def reopen_info_panel(self):
-        """重新打开编辑器面板"""
-        if hasattr(self, 'last_editor_state') and self.last_editor_state:
-            self.editor_panel.set_content(
-                self.last_editor_state['title'],
-                self.last_editor_state['content']
-            )
-            self.editor_panel.show()
-            # 调整编辑器面板位置
-            self.editor_panel.move(
-                self.width() - self.editor_panel.width() - 10,
-                50
-            )
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -491,26 +339,6 @@ class FakeConsole(QMainWindow):
                     
             except Exception as e:
                 self._format_and_insert_text(f"[ERROR] {str(e)}")
-
-    def showHelp(self):
-        help_text = """
-[INFO] 快捷键帮助:
-    Ctrl+Q : 退出程序
-    Ctrl+M : 最小化窗口
-    Ctrl+H : 显示帮助信息
-    Ctrl+B : 显示/隐藏工具栏
-    Ctrl+S : 保存当前内容
-    Ctrl+R : 显示当前文件内容
-    Ctrl+Z : 撤销上一次输入
-    Esc   : 关闭编辑器窗口
-    
-[INFO] 使用说明:
-    - 在文件树中右键可以新建或删除文件
-    - 双击文件可以打开
-    - 所有输入内容会自动保存
-    - 每60秒自动保存一次
-"""
-        self._format_and_insert_text(help_text)
 
     def show_current_content(self):
         """显示当前文件内容"""
